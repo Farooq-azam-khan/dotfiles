@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+if [[ $# -eq 1 ]]; then
+  selected=$1
+else
+  selected=$(find ~/.config ~/dev ~/ ~/Documents -mindepth 1 -maxdepth 1 -type d | fzf)
+fi
+
+if [[ -z $selected ]]; then
+  exit 0
+fi
+
+selected_name=$(basename "$selected" | tr . _)
+tmux_running=$(pgrep tmux)
+echo "selected      = ${selected}"
+echo "selected name = ${selected_name}"
+echo "tmux running  = ${tmux_running}"
+# Check if the folder is a git repository
+is_git_repo=false
+if [[ -d "$selected/.git" ]] || git -C "$selected" rev-parse --is-inside-work-tree &>/dev/null; then
+  is_git_repo=true
+fi
+echo "is git repo: $is_git_repo"
+if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+  echo "creating new session"
+  tmux new-session -ds $selected_name -c $selected
+  # If it's a git repo, create window 2 and run lazygit there
+  if [[ $is_git_repo == true ]]; then
+    echo "Setting Lazygit"
+    tmux new-window -t $selected_name:2 -n "lazygit" -c $selected
+    tmux send-keys -t $selected_name:2 "lazygit" C-m
+  fi
+
+  if [[ -z $TMUX ]]; then
+    tmux attach -t $selected_name:1
+  else
+    tmux switch-client -t $selected_name:1
+  fi
+  exit 0
+fi
+
+if ! tmux has-session -t=$selected_name 2>/dev/null; then
+  echo "Tmux session exists"
+  tmux new-session -ds $selected_name -c $selected
+  # If it's a git repo, create window 2 and run lazygit there
+  if [[ $is_git_repo == true ]]; then
+    tmux new-window -t $selected_name:2 -n "lazygit" -c $selected
+    tmux send-keys -t $selected_name:2 "lazygit" C-m
+    tmux select-window -t $selected_name:1 # Go back to first window
+  fi
+fi
+
+if [[ -z $TMUX ]]; then
+  tmux attach -t $selected_name:1
+else
+  tmux switch-client -t $selected_name:1
+fi
