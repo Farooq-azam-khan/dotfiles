@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+
+# Obsidian to LaTeX and PDF Converter with fzf integration
+# Usage: ./convert.sh [input.md] [output_name]
+#        (if no input provided, uses fzf to select)
+
+set -e # Exit on error
+
+# Configuration
+SEARCH_DIRS=(
+  ~/Documents
+  ~/research-notes
+)
+DOWNLOADS="$HOME/Downloads"
+FILE_EXTENSIONS="*.md"
+
+# Function to find markdown files
+find_markdown_files() {
+  local search_paths=()
+  for dir in "${SEARCH_DIRS[@]}"; do
+    [[ -d "$dir" ]] && search_paths+=("$dir")
+  done
+
+  if [[ ${#search_paths[@]} -eq 0 ]]; then
+    echo "Error: No valid search directories found" >&2
+    exit 1
+  fi
+
+  find "${search_paths[@]}" -type f -name "$FILE_EXTENSIONS" 2>/dev/null
+}
+
+# Function to select file with fzf
+select_file_with_fzf() {
+  local selected
+  selected=$(
+    find_markdown_files | fzf \
+      --height 40% \
+      --reverse \
+      --border \
+      --prompt="Select markdown file: " \
+      --preview 'bat --style=numbers --color=always --line-range :50 {} 2>/dev/null || cat {}' \
+      --preview-window=right:60%:wrap
+  )
+  echo "$selected"
+}
+
+# Get input file
+if [[ $# -ge 1 ]] && [[ -f "$1" ]]; then
+  INPUT="$1"
+else
+  # Check if fzf is available
+  if ! command -v fzf &>/dev/null; then
+    echo "Error: fzf not found. Please install fzf or provide input file directly." >&2
+    echo "Usage: $0 input.md [output_name]" >&2
+    exit 1
+  fi
+
+  INPUT=$(select_file_with_fzf)
+  if [[ -z "$INPUT" ]]; then
+    echo "No file selected. Exiting." >&2
+    exit 0
+  fi
+fi
+
+# Validate input file
+if [[ ! -f "$INPUT" ]]; then
+  echo "Error: File '$INPUT' not found" >&2
+  exit 1
+fi
+
+# Get output basename
+BASENAME="${2:-$(basename "${INPUT%.md}" | tr ' ' '_')}"
+TEX="${DOWNLOADS}/${BASENAME}.tex"
+PDF="${DOWNLOADS}/${BASENAME}.pdf"
+
+# Get metadata
+DATE=$(date "+%B %d, %Y")
+TITLE=$(basename "${INPUT%.md}")
+
+echo "Converting: $INPUT"
+echo "Output: $PDF"
+
+# Create temporary file for preprocessing
+TEMP=$(mktemp)
+trap "rm -f '$TEMP'" EXIT # Ensure cleanup on exit
+
+# Preprocess markdown
+# - Convert #Todo to **Todo**
+# - Convert [[Obsidian links]] to [Obsidian links]
+# - Handle ![[image.png]] embeds
+sed -e 's/^#Todo/**Todo**/g' \
+  -e 's/\[\[\([^]|]*\)|\([^]]*\)\]\]/[\2](\1)/g' \
+  -e 's/\[\[\([^]]*\)\]\]/[\1](\1)/g' \
+  -e 's/!\[\[\([^]]*\)\]\]/![\1](\1)/g' \
+  "$INPUT" >"$TEMP"
+
+# Convert to LaTeX
+pandoc "$TEMP" \
+  -f markdown \
+  -t latex \
+  --standalone \
+  -V geometry:margin=1in \
+  -V pagestyle=headings \
+  -V documentclass=article \
+  -V fontsize=11pt \
+  -V linestretch=1.15 \
+  -V colorlinks=true \
+  -V linkcolor=blue \
+  -V urlcolor=blue \
+  -V toccolor=black \
+  --number-sections \
+  --table-of-contents \
+  --highlight-style=tango \
+  -V title="$TITLE" \
+  -V author="Farooq A. Khan" \
+  -V date="$DATE" \
+  -o "$TEX"
+
+echo "✓ Created: $TEX"
+
+# Convert LaTeX to PDF
+echo "Generating PDF..."
+cd "$DOWNLOADS"
+
+# Run pdflatex twice for proper cross-references and TOC
+pdflatex -interaction=nonstopmode "${BASENAME}.tex" >/dev/null
+pdflatex -interaction=nonstopmode "${BASENAME}.tex" >/dev/null
+
+# Clean up auxiliary files
+rm -f "${BASENAME}.aux" \
+  "${BASENAME}.log" \
+  "${BASENAME}.out" \
+  "${BASENAME}.toc" \
+  "${BASENAME}.nav" \
+  "${BASENAME}.snm"
+
+echo "✓ Created: $PDF"
+
+# Optional: Open PDF automatically (uncomment for macOS/Linux)
+# [[ "$OSTYPE" == "darwin"* ]] && open "$PDF"
+# [[ "$OSTYPE" == "linux-gnu"* ]] && xdg-open "$PDF" 2>/dev/null
+
+echo ""
+echo "Conversion complete!"
