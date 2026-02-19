@@ -124,7 +124,7 @@ sed -e 's/^#Todo/**Todo**/g' \
   -e 's/!\[\[\([^]]*\)\]\]/![\1](\1)/g' \
   "$INPUT" | \
 awk '
-  BEGIN { in_env = 0; env = "" }
+  BEGIN { in_env = 0; env = ""; in_align = 0; has_prev = 0; prev_line = "" }
   function start_env(new_env) {
     if (in_env) {
       print "\\end{" env "}"
@@ -132,6 +132,37 @@ awk '
     env = new_env
     print "\\begin{" env "}"
     in_env = 1
+  }
+  function print_align_prev_with_trim() {
+    if (!has_prev) return
+    line = prev_line
+    sub(/\\\\[[:space:]]*$/, "", line)
+    if (line != "") {
+      print line
+    }
+  }
+  in_align {
+    if ($0 ~ /\\end\{align\*?\}/) {
+      print_align_prev_with_trim()
+      print $0
+      in_align = 0
+      has_prev = 0
+      prev_line = ""
+      next
+    }
+    if (has_prev) {
+      print prev_line
+    }
+    prev_line = $0
+    has_prev = 1
+    next
+  }
+  /\\begin\{align\*?\}/ {
+    print $0
+    in_align = 1
+    has_prev = 0
+    prev_line = ""
+    next
   }
   /^#(Theorem|Lemma|Definition|Corollary|Corollory|Proof)([[:space:]].*)?$/ {
     line = $0
@@ -161,6 +192,9 @@ awk '
   }
   { print }
   END {
+    if (in_align) {
+      print_align_prev_with_trim()
+    }
     if (in_env) {
       print "\\end{" env "}"
     }
