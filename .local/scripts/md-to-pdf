@@ -82,7 +82,8 @@ echo "Output: $PDF"
 
 # Create temporary file for preprocessing
 TEMP=$(mktemp)
-trap "rm -f '$TEMP'" EXIT # Ensure cleanup on exit
+THEOREM_PREAMBLE=""
+trap "rm -f '$TEMP' '$THEOREM_PREAMBLE'" EXIT # Ensure cleanup on exit
 
 # Preprocess markdown
 # - Convert #Todo to **Todo**
@@ -92,13 +93,55 @@ sed -e 's/^#Todo/**Todo**/g' \
   -e 's/\[\[\([^]|]*\)|\([^]]*\)\]\]/[\2](\1)/g' \
   -e 's/\[\[\([^]]*\)\]\]/[\1](\1)/g' \
   -e 's/!\[\[\([^]]*\)\]\]/![\1](\1)/g' \
-  "$INPUT" >"$TEMP"
+  "$INPUT" | \
+awk '
+  BEGIN { in_env = 0; env = "" }
+  function start_env(new_env) {
+    if (in_env) {
+      print "\\end{" env "}"
+    }
+    env = new_env
+    print "\\begin{" env "}"
+    in_env = 1
+  }
+  /^#Theorem[[:space:]]*$/ { start_env("theorem"); next }
+  /^#Lemma[[:space:]]*$/ { start_env("lemma"); next }
+  /^#Definition[[:space:]]*$/ { start_env("definition"); next }
+  /^#Corollary[[:space:]]*$/ { start_env("corollary"); next }
+  /^#Corollory[[:space:]]*$/ { start_env("corollary"); next }
+  /^#Proof[[:space:]]*$/ { start_env("proof"); next }
+  in_env && /^[[:space:]]*$/ {
+    print "\\end{" env "}"
+    in_env = 0
+    env = ""
+    print ""
+    next
+  }
+  { print }
+  END {
+    if (in_env) {
+      print "\\end{" env "}"
+    }
+  }
+' >"$TEMP"
 
 # Convert to LaTeX
+THEOREM_PREAMBLE=$(mktemp)
+cat >"$THEOREM_PREAMBLE" <<'EOF'
+\usepackage{amsthm}
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+EOF
+
 pandoc "$TEMP" \
   -f markdown \
   -t latex \
   --standalone \
+  -H "$THEOREM_PREAMBLE" \
   -V geometry:margin=1in \
   -V pagestyle=headings \
   -V documentclass=article \
