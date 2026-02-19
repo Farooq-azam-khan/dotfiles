@@ -44,14 +44,32 @@ select_file_with_fzf() {
   echo "$selected"
 }
 
+# Parse options
+INPUT=""
+FORMAT=false
+while getopts ":f:p" opt; do
+  case "$opt" in
+  f) INPUT="$OPTARG" ;;
+  p) FORMAT=true ;;
+  *)
+    echo "Usage: $0 [-f input.md] [-p] [output_name]" >&2
+    exit 1
+    ;;
+  esac
+done
+shift $((OPTIND - 1))
+
 # Get input file
-if [[ $# -ge 1 ]] && [[ -f "$1" ]]; then
+if [[ -n "$INPUT" ]]; then
+  : # INPUT already provided via -f
+elif [[ $# -ge 1 ]] && [[ -f "$1" ]]; then
   INPUT="$1"
+  shift
 else
   # Check if fzf is available
   if ! command -v fzf &>/dev/null; then
     echo "Error: fzf not found. Please install fzf or provide input file directly." >&2
-    echo "Usage: $0 input.md [output_name]" >&2
+    echo "Usage: $0 [-f input.md] [-p] [output_name]" >&2
     exit 1
   fi
 
@@ -62,6 +80,17 @@ else
   fi
 fi
 
+# Optional: format markdown before conversion
+if [[ "$FORMAT" == true ]]; then
+  if command -v prettier &>/dev/null; then
+    prettier --write "$INPUT"
+  elif command -v markdownlint-cli2 &>/dev/null; then
+    markdownlint-cli2 "$INPUT" --fix
+  else
+    echo "Warning: -p requested but no formatter found (prettier or markdownlint-cli2)." >&2
+  fi
+fi
+
 # Validate input file
 if [[ ! -f "$INPUT" ]]; then
   echo "Error: File '$INPUT' not found" >&2
@@ -69,7 +98,7 @@ if [[ ! -f "$INPUT" ]]; then
 fi
 
 # Get output basename
-BASENAME="${2:-$(basename "${INPUT%.md}" | tr ' ' '_')}"
+BASENAME="${1:-$(basename "${INPUT%.md}" | tr ' ' '_')}"
 TEX="${DOWNLOADS}/${BASENAME}.tex"
 PDF="${DOWNLOADS}/${BASENAME}.pdf"
 
@@ -104,12 +133,25 @@ awk '
     print "\\begin{" env "}"
     in_env = 1
   }
-  /^#Theorem[[:space:]]*$/ { start_env("theorem"); next }
-  /^#Lemma[[:space:]]*$/ { start_env("lemma"); next }
-  /^#Definition[[:space:]]*$/ { start_env("definition"); next }
-  /^#Corollary[[:space:]]*$/ { start_env("corollary"); next }
-  /^#Corollory[[:space:]]*$/ { start_env("corollary"); next }
-  /^#Proof[[:space:]]*$/ { start_env("proof"); next }
+  /^#(Theorem|Lemma|Definition|Corollary|Corollory|Proof)([[:space:]].*)?$/ {
+    line = $0
+    sub(/^#/, "", line)
+    if (match(line, /^[^[:space:]]+/)) {
+      kind = substr(line, RSTART, RLENGTH)
+      rest = substr(line, RSTART + RLENGTH)
+      gsub(/^[[:space:]]+/, "", rest)
+    } else {
+      kind = line
+      rest = ""
+    }
+    if (kind == "Theorem") start_env("theorem")
+    else if (kind == "Lemma") start_env("lemma")
+    else if (kind == "Definition") start_env("definition")
+    else if (kind == "Corollary" || kind == "Corollory") start_env("corollary")
+    else if (kind == "Proof") start_env("proof")
+    if (rest != "") print rest
+    next
+  }
   in_env && /^[[:space:]]*$/ {
     print "\\end{" env "}"
     in_env = 0
