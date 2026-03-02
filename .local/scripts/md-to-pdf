@@ -47,12 +47,25 @@ select_file_with_fzf() {
 # Parse options
 INPUT=""
 FORMAT=false
+COMPACT=false
+
+# Handle long options before getopts
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--compact" ]]; then
+    COMPACT=true
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
+
 while getopts ":f:p" opt; do
   case "$opt" in
   f) INPUT="$OPTARG" ;;
   p) FORMAT=true ;;
   *)
-    echo "Usage: $0 [-f input.md] [-p] [output_name]" >&2
+    echo "Usage: $0 [--compact] [-f input.md] [-p] [output_name]" >&2
     exit 1
     ;;
   esac
@@ -69,7 +82,7 @@ else
   # Check if fzf is available
   if ! command -v fzf &>/dev/null; then
     echo "Error: fzf not found. Please install fzf or provide input file directly." >&2
-    echo "Usage: $0 [-f input.md] [-p] [output_name]" >&2
+    echo "Usage: $0 [--compact] [-f input.md] [-p] [output_name]" >&2
     exit 1
   fi
 
@@ -112,8 +125,10 @@ echo "Output: $PDF"
 # Create temporary file for preprocessing
 TEMP=$(mktemp)
 THEOREM_PREAMBLE=""
-trap "rm -f '$TEMP' '$THEOREM_PREAMBLE'" EXIT # Ensure cleanup on exit
+COMPACT_PREAMBLE=""
+trap "rm -f '$TEMP' '$THEOREM_PREAMBLE' '$COMPACT_PREAMBLE'" EXIT # Ensure cleanup on exit
 
+# TODO: does not handle multi paragraph proofs.
 # Preprocess markdown
 # - Convert #Todo to **Todo**
 # - Convert [[Obsidian links]] to [Obsidian links]
@@ -122,8 +137,8 @@ sed -e 's/^#Todo/**Todo**/g' \
   -e 's/\[\[\([^]|]*\)|\([^]]*\)\]\]/[\2](\1)/g' \
   -e 's/\[\[\([^]]*\)\]\]/[\1](\1)/g' \
   -e 's/!\[\[\([^]]*\)\]\]/![\1](\1)/g' \
-  "$INPUT" | \
-awk '
+  "$INPUT" |
+  awk '
   BEGIN { in_env = 0; env = ""; in_align = 0; has_prev = 0; prev_line = "" }
   function start_env(new_env) {
     if (in_env) {
@@ -213,27 +228,72 @@ cat >"$THEOREM_PREAMBLE" <<'EOF'
 \newtheorem{definition}{Definition}
 EOF
 
-pandoc "$TEMP" \
-  -f markdown \
-  -t latex \
-  --standalone \
-  -H "$THEOREM_PREAMBLE" \
-  -V geometry:margin=1in \
-  -V pagestyle=headings \
-  -V documentclass=article \
-  -V fontsize=11pt \
-  -V linestretch=1.15 \
-  -V colorlinks=true \
-  -V linkcolor=blue \
-  -V urlcolor=blue \
-  -V toccolor=black \
-  --number-sections \
-  --table-of-contents \
-  --highlight-style=tango \
-  -V title="$TITLE" \
-  -V author="Farooq A. Khan" \
-  -V date="$DATE" \
+PANDOC_ARGS=(
+  -f markdown
+  -t latex
+  --standalone
+  -H "$THEOREM_PREAMBLE"
+  -V geometry:margin=1in
+  -V pagestyle=headings
+  -V documentclass=article
+  -V fontsize=11pt
+  -V linestretch=1.15
+  -V colorlinks=true
+  -V linkcolor=blue
+  -V urlcolor=blue
+  -V toccolor=black
+  --number-sections
+  --table-of-contents
+  --highlight-style=tango
+  -V title="$TITLE"
+  -V author="Farooq A. Khan"
+  -V date="$DATE"
   -o "$TEX"
+)
+
+COMPACT_PREAMBLE=""
+if [[ "$COMPACT" == true ]]; then
+  COMPACT_PREAMBLE=$(mktemp)
+  cat >"$COMPACT_PREAMBLE" <<'EOF'
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2pt}
+% Small, tight title without extra packages
+\makeatletter
+\renewcommand{\maketitle}{%
+  \begin{center}
+    {\scriptsize\bfseries \@title\par}
+    \vspace{-0.6em}
+    {\scriptsize \@author\par}
+    \vspace{-0.8em}
+    {\scriptsize \@date\par}
+  \end{center}
+}
+\makeatother
+EOF
+  PANDOC_ARGS=(
+    -f markdown
+    -t latex
+    --standalone
+    -H "$THEOREM_PREAMBLE"
+    -H "$COMPACT_PREAMBLE"
+    -V geometry:margin=0.5in
+    -V pagestyle=empty
+    -V documentclass=article
+    -V fontsize=10pt
+    -V linestretch=1.0
+    -V colorlinks=true
+    -V linkcolor=blue
+    -V urlcolor=blue
+    -V toccolor=black
+    --highlight-style=tango
+    -V title="$TITLE"
+    -V author="Farooq A. Khan"
+    -V date=""
+    -o "$TEX"
+  )
+fi
+
+pandoc "$TEMP" "${PANDOC_ARGS[@]}"
 
 echo "✓ Created: $TEX"
 
@@ -242,8 +302,21 @@ echo "Generating PDF..."
 cd "$DOWNLOADS"
 
 # Run pdflatex twice for proper cross-references and TOC
-pdflatex -interaction=nonstopmode "${BASENAME}.tex" >/dev/null
-pdflatex -interaction=nonstopmode "${BASENAME}.tex" >/dev/null
+run_pdflatex() {
+  local pass="$1"
+  local log_file
+  log_file=$(mktemp)
+  if ! pdflatex -interaction=nonstopmode "${BASENAME}.tex" >"$log_file" 2>&1; then
+    echo "Error: pdflatex failed on pass ${pass}. Last 40 log lines:" >&2
+    tail -n 40 "$log_file" >&2
+    rm -f "$log_file"
+    exit 1
+  fi
+  rm -f "$log_file"
+}
+
+run_pdflatex 1
+run_pdflatex 2
 
 # Clean up auxiliary files
 rm -f "${BASENAME}.aux" \
