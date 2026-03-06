@@ -48,15 +48,37 @@ select_file_with_fzf() {
 INPUT=""
 FORMAT=false
 COMPACT=false
+COLS=1
 
 # Handle long options before getopts
 ARGS=()
-for arg in "$@"; do
-  if [[ "$arg" == "--compact" ]]; then
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --compact)
     COMPACT=true
-  else
-    ARGS+=("$arg")
-  fi
+    shift
+    ;;
+  --cols)
+    COLS="${2:-}"
+    shift 2
+    ;;
+  --cols=*)
+    COLS="${1#*=}"
+    shift
+    ;;
+  --two-col | --two-cols | --twocolumn)
+    COLS=2
+    shift
+    ;;
+  --)
+    shift
+    break
+    ;;
+  *)
+    ARGS+=("$1")
+    shift
+    ;;
+  esac
 done
 set -- "${ARGS[@]}"
 
@@ -65,7 +87,7 @@ while getopts ":f:p" opt; do
   f) INPUT="$OPTARG" ;;
   p) FORMAT=true ;;
   *)
-    echo "Usage: $0 [--compact] [-f input.md] [-p] [output_name]" >&2
+    echo "Usage: $0 [--compact] [--cols N|--two-col] [-f input.md] [-p] [output_name]" >&2
     exit 1
     ;;
   esac
@@ -82,7 +104,7 @@ else
   # Check if fzf is available
   if ! command -v fzf &>/dev/null; then
     echo "Error: fzf not found. Please install fzf or provide input file directly." >&2
-    echo "Usage: $0 [--compact] [-f input.md] [-p] [output_name]" >&2
+    echo "Usage: $0 [--compact] [--cols N|--two-col] [-f input.md] [-p] [output_name]" >&2
     exit 1
   fi
 
@@ -252,6 +274,11 @@ PANDOC_ARGS=(
 )
 
 COMPACT_PREAMBLE=""
+if [[ "$COLS" != "1" && "$COLS" != "2" ]]; then
+  echo "Error: --cols must be 1 or 2 (got '$COLS')." >&2
+  exit 1
+fi
+
 if [[ "$COMPACT" == true ]]; then
   COMPACT_PREAMBLE=$(mktemp)
   cat >"$COMPACT_PREAMBLE" <<'EOF'
@@ -297,6 +324,8 @@ if [[ "$COMPACT" == true ]]; then
 \setlength{\belowdisplayskip}{4pt}
 \setlength{\abovedisplayshortskip}{2pt}
 \setlength{\belowdisplayshortskip}{2pt}
+% Column gap (if two-column)
+\setlength{\columnsep}{10pt}
 EOF
   PANDOC_ARGS=(
     -f markdown
@@ -319,6 +348,10 @@ EOF
     -V date=""
     -o "$TEX"
   )
+fi
+
+if [[ "$COLS" == "2" ]]; then
+  PANDOC_ARGS+=(-V classoption=twocolumn)
 fi
 
 pandoc "$TEMP" "${PANDOC_ARGS[@]}"
