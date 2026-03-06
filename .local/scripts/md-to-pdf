@@ -276,6 +276,27 @@ if [[ "$COMPACT" == true ]]; then
 \makeatletter
 \g@addto@macro\@floatboxreset{\small}
 \makeatother
+% Smaller, tighter headings without extra packages
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {0.6ex \@plus .2ex \@minus .2ex}%
+  {0.4ex \@plus .2ex \@minus .2ex}%
+  {\normalsize\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {0.5ex \@plus .2ex \@minus .2ex}%
+  {0.3ex \@plus .2ex \@minus .2ex}%
+  {\small\bfseries}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+  {0.4ex \@plus .2ex \@minus .2ex}%
+  {0.2ex \@plus .2ex \@minus .2ex}%
+  {\small\bfseries}}
+\makeatother
+% Tighter lists and math
+\setlength{\parskip}{2pt}
+\setlength{\abovedisplayskip}{4pt}
+\setlength{\belowdisplayskip}{4pt}
+\setlength{\abovedisplayshortskip}{2pt}
+\setlength{\belowdisplayshortskip}{2pt}
 EOF
   PANDOC_ARGS=(
     -f markdown
@@ -283,7 +304,7 @@ EOF
     --standalone
     -H "$THEOREM_PREAMBLE"
     -H "$COMPACT_PREAMBLE"
-    -V geometry:margin=0.5in
+    -V geometry:margin=0.4in
     -V pagestyle=empty
     -V documentclass=article
     -V fontsize=10pt
