@@ -269,6 +269,13 @@ if [[ "$COMPACT" == true ]]; then
   \end{center}
 }
 \makeatother
+% Compact tables
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{0.9}
+% Slightly smaller font inside tables
+\makeatletter
+\g@addto@macro\@floatboxreset{\small}
+\makeatother
 EOF
   PANDOC_ARGS=(
     -f markdown
